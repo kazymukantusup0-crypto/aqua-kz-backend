@@ -1,0 +1,25 @@
+# Generated local model artifacts; training recreates these files.
+models/drought_model.joblib
+models/metrics.json
+__pycache__/
+.pytest_cache/
+.venv/
+.venv311/
+data/patches/*/images/*.npy
+data/patches/*/labels/*.npy
+ml/weights/*.pth
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Secrets
+.env
+
+# Trained ML weights and runtime logs
+ml/weights/*.pth
+ml/weights/*.log
+
+# Dataset files
+data/
