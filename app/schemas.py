@@ -114,3 +114,20 @@ class SegmentationInferenceResponse(BaseModel):
     drought_threshold: float = Field(ge=0, le=1)
     drought_fraction: float = Field(ge=0, le=1)
     mask: list[list[int]]
+
+
+class PersistedInferenceRun(BaseModel):
+    id: str
+    created_at: str
+    source_type: Literal["upload", "coordinates"]
+    upload_filename: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    year: int | None = None
+    width: int = Field(ge=1)
+    height: int = Field(ge=1)
+    drought_threshold: float = Field(ge=0, le=1)
+    drought_fraction: float = Field(ge=0, le=1)
+    drought_pixel_count: int = Field(ge=0)
+    total_pixel_count: int = Field(ge=1)
+    mask_url: str
