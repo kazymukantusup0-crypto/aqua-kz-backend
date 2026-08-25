@@ -131,3 +131,5 @@ class PersistedInferenceRun(BaseModel):
     drought_pixel_count: int = Field(ge=0)
     total_pixel_count: int = Field(ge=1)
     mask_url: str
+    preview_url: str
+    overlay_url: str

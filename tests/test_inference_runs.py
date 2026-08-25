@@ -1,4 +1,6 @@
 import sqlite3
+import struct
+import zlib
 from io import BytesIO
 
 import numpy as np
@@ -7,6 +9,26 @@ from fastapi.testclient import TestClient
 from app.api import routes_segmentation
 from app.main import app
 from app.services import inference_run_service
+
+
+def read_png(content: bytes) -> tuple[int, int, int, bytes]:
+    assert content.startswith(b"\x89PNG\r\n\x1a\n")
+    position = 8
+    width = height = color_type = 0
+    compressed = b""
+    while position < len(content):
+        length = struct.unpack(">I", content[position : position + 4])[0]
+        chunk_type = content[position + 4 : position + 8]
+        chunk = content[position + 8 : position + 8 + length]
+        position += 12 + length
+        if chunk_type == b"IHDR":
+            width, height, bit_depth, color_type, _, _, _ = struct.unpack(">IIBBBBB", chunk)
+            assert bit_depth == 8
+        elif chunk_type == b"IDAT":
+            compressed += chunk
+        elif chunk_type == b"IEND":
+            break
+    return width, height, color_type, zlib.decompress(compressed)
 
 
 def configure_storage(monkeypatch, tmp_path):
@@ -82,6 +104,39 @@ def test_mask_download_and_404_cases(monkeypatch, tmp_path) -> None:
     missing_file = client.get(f"/api/ml/runs/{run['id']}/mask")
     assert missing_file.status_code == 404
     assert "saved inference mask" in missing_file.json()["detail"]
+
+
+def test_save_creates_valid_preview_and_overlay_artifacts(monkeypatch, tmp_path) -> None:
+    _, predictions_path = configure_storage(monkeypatch, tmp_path)
+    binary_mask = np.array([[0, 1], [1, 0]], dtype=np.uint8)
+
+    run = inference_run_service.save_inference_run(binary_mask, 0.5, 0.5, "upload", "tile.npy")
+    preview = (predictions_path / f"{run['id']}_mask.png").read_bytes()
+    overlay = (predictions_path / f"{run['id']}_overlay.png").read_bytes()
+    preview_width, preview_height, preview_type, preview_data = read_png(preview)
+    overlay_width, overlay_height, overlay_type, overlay_data = read_png(overlay)
+
+    assert (preview_width, preview_height, preview_type) == (2, 2, 0)
+    assert preview_data == b"\x00\x00\xff\x00\xff\x00"
+    assert (overlay_width, overlay_height, overlay_type) == (2, 2, 6)
+    assert overlay_data[:9] == b"\x00" + bytes([0, 0, 0, 0, 220, 38, 38, 165])
+    assert overlay_data[9:] == b"\x00" + bytes([220, 38, 38, 165, 0, 0, 0, 0])
+
+
+def test_preview_and_overlay_endpoints_return_png_and_missing_artifacts_404(monkeypatch, tmp_path) -> None:
+    _, predictions_path = configure_storage(monkeypatch, tmp_path)
+    run = inference_run_service.save_inference_run(np.ones((2, 2)), 1, 0.5, "upload", "tile.npy")
+    client = TestClient(app)
+
+    preview = client.get(f"/api/ml/runs/{run['id']}/preview")
+    overlay = client.get(f"/api/ml/runs/{run['id']}/overlay")
+    assert preview.status_code == overlay.status_code == 200
+    assert preview.headers["content-type"] == overlay.headers["content-type"] == "image/png"
+
+    (predictions_path / f"{run['id']}_mask.png").unlink()
+    (predictions_path / f"{run['id']}_overlay.png").unlink()
+    assert client.get(f"/api/ml/runs/{run['id']}/preview").status_code == 404
+    assert client.get(f"/api/ml/runs/{run['id']}/overlay").status_code == 404
 
 
 def test_persistent_upload_inference_reuses_inference_flow(monkeypatch, tmp_path) -> None:

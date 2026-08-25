@@ -22,9 +22,7 @@ from app.services.segmentation_service import (
 )
 from app.services.inference_run_service import (
     get_inference_run,
-    initialize_storage,
     list_inference_runs,
-    load_saved_mask,
     save_inference_run,
 )
 from ml.export_gee_dataset import EarthEngineConfigurationError, fetch_patch_for_coordinates, initialize_earth_engine
@@ -97,6 +95,8 @@ def _compact_run(run: dict) -> PersistedInferenceRun:
     return PersistedInferenceRun(
         **{key: value for key, value in run.items() if key != "mask_path"},
         mask_url=f"/api/ml/runs/{run['id']}/mask",
+        preview_url=f"/api/ml/runs/{run['id']}/preview",
+        overlay_url=f"/api/ml/runs/{run['id']}/overlay",
     )
 
 
@@ -158,3 +158,23 @@ def get_run_mask(run_id: str) -> FileResponse:
     if not mask_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="The saved inference mask was not found.")
     return FileResponse(mask_path, media_type="application/octet-stream", filename=f"{run_id}_mask.npy")
+
+
+def _get_run_artifact(run_id: str, label: str) -> FileResponse:
+    run = get_inference_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inference run was not found.")
+    artifact_path = Path(run["mask_path"]).with_name(f"{run_id}_{label}.png")
+    if not artifact_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"The saved {label} artifact was not found.")
+    return FileResponse(artifact_path, media_type="image/png", filename=artifact_path.name)
+
+
+@router.get("/runs/{run_id}/preview")
+def get_run_preview(run_id: str) -> FileResponse:
+    return _get_run_artifact(run_id, "mask")
+
+
+@router.get("/runs/{run_id}/overlay")
+def get_run_overlay(run_id: str) -> FileResponse:
+    return _get_run_artifact(run_id, "overlay")

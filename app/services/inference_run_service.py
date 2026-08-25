@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
+import struct
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -70,6 +72,8 @@ def save_inference_run(
     with temporary_path.open("wb") as temporary_file:
         np.save(temporary_file, binary_mask, allow_pickle=False)
     temporary_path.replace(mask_path)
+    saved_mask = load_saved_mask({"mask_path": str(mask_path)})
+    _save_png_artifacts(run_id, saved_mask)
     metadata = {
         "id": run_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -102,6 +106,36 @@ def save_inference_run(
             metadata,
         )
     return metadata
+
+
+def _png_chunk(chunk_type: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + chunk_type + data + struct.pack(">I", zlib.crc32(chunk_type + data) & 0xFFFFFFFF)
+
+
+def _encode_png(mask: np.ndarray, overlay: bool) -> bytes:
+    height, width = mask.shape
+    channels = 4 if overlay else 1
+    color_type = 6 if overlay else 0
+    rows = []
+    for row in mask:
+        if overlay:
+            pixels = np.zeros((width, 4), dtype=np.uint8)
+            pixels[row.astype(bool), :3] = (220, 38, 38)
+            pixels[row.astype(bool), 3] = 165
+        else:
+            pixels = (row.astype(bool) * 255).astype(np.uint8)[:, None]
+        rows.append(b"\x00" + pixels.tobytes())
+    signature = b"\x89PNG\r\n\x1a\n"
+    header = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
+    return signature + _png_chunk(b"IHDR", header) + _png_chunk(b"IDAT", zlib.compress(b"".join(rows))) + _png_chunk(b"IEND", b"")
+
+
+def _save_png_artifacts(run_id: str, binary_mask: np.ndarray) -> tuple[Path, Path]:
+    preview_path = PREDICTIONS_DIR / f"{run_id}_mask.png"
+    overlay_path = PREDICTIONS_DIR / f"{run_id}_overlay.png"
+    preview_path.write_bytes(_encode_png(binary_mask, overlay=False))
+    overlay_path.write_bytes(_encode_png(binary_mask, overlay=True))
+    return preview_path, overlay_path
 
 
 def _row_to_dict(row: sqlite3.Row | None) -> dict[str, Any] | None:
