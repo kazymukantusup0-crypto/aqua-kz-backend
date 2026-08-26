@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import struct
 import zlib
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -51,6 +51,16 @@ def initialize_storage() -> None:
             )
             """
         )
+        existing_columns = {row[1] for row in connection.execute("PRAGMA table_info(inference_runs)")}
+        for column, definition in (
+            ("requested_year", "INTEGER"),
+            ("requested_month", "INTEGER"),
+            ("scene_start_date", "TEXT"),
+            ("scene_end_date", "TEXT"),
+            ("satellite_source", "TEXT"),
+        ):
+            if column not in existing_columns:
+                connection.execute(f"ALTER TABLE inference_runs ADD COLUMN {column} {definition}")
 
 
 def save_inference_run(
@@ -62,6 +72,11 @@ def save_inference_run(
     latitude: float | None = None,
     longitude: float | None = None,
     year: int | None = None,
+    requested_year: int | None = None,
+    requested_month: int | None = None,
+    scene_start_date: date | str | None = None,
+    scene_end_date: date | str | None = None,
+    satellite_source: str | None = None,
 ) -> dict[str, Any]:
     """Save a binary drought mask and its compact metadata."""
     initialize_storage()
@@ -82,6 +97,11 @@ def save_inference_run(
         "latitude": latitude,
         "longitude": longitude,
         "year": year,
+        "requested_year": requested_year,
+        "requested_month": requested_month,
+        "scene_start_date": scene_start_date.isoformat() if isinstance(scene_start_date, date) else scene_start_date,
+        "scene_end_date": scene_end_date.isoformat() if isinstance(scene_end_date, date) else scene_end_date,
+        "satellite_source": satellite_source,
         "width": int(binary_mask.shape[1]),
         "height": int(binary_mask.shape[0]),
         "drought_threshold": threshold,
@@ -95,10 +115,12 @@ def save_inference_run(
             """
             INSERT INTO inference_runs (
                 id, created_at, source_type, upload_filename, latitude, longitude, year,
+                requested_year, requested_month, scene_start_date, scene_end_date, satellite_source,
                 width, height, drought_threshold, drought_fraction, drought_pixel_count,
                 total_pixel_count, mask_path
             ) VALUES (
                 :id, :created_at, :source_type, :upload_filename, :latitude, :longitude, :year,
+                :requested_year, :requested_month, :scene_start_date, :scene_end_date, :satellite_source,
                 :width, :height, :drought_threshold, :drought_fraction, :drought_pixel_count,
                 :total_pixel_count, :mask_path
             )

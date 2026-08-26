@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 RiskLevel = Literal["low", "medium", "high"]
+MonitoringRiskLevel = Literal["low", "medium", "high", "critical"]
+Trend = Literal["improving", "stable", "worsening", "insufficient_data"]
 
 
 class ObservationInput(BaseModel):
@@ -106,6 +108,7 @@ class CoordinateInferenceRequest(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     year: int = Field(default=2024, ge=2017, le=2100)
+    month: int | None = Field(default=None, ge=1, le=12)
 
 
 class SegmentationInferenceResponse(BaseModel):
@@ -114,6 +117,11 @@ class SegmentationInferenceResponse(BaseModel):
     drought_threshold: float = Field(ge=0, le=1)
     drought_fraction: float = Field(ge=0, le=1)
     mask: list[list[int]]
+    requested_year: int | None = None
+    requested_month: int | None = Field(default=None, ge=1, le=12)
+    scene_start_date: date | None = None
+    scene_end_date: date | None = None
+    satellite_source: str | None = None
 
 
 class PersistedInferenceRun(BaseModel):
@@ -124,6 +132,11 @@ class PersistedInferenceRun(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     year: int | None = None
+    requested_year: int | None = None
+    requested_month: int | None = Field(default=None, ge=1, le=12)
+    scene_start_date: date | None = None
+    scene_end_date: date | None = None
+    satellite_source: str | None = None
     width: int = Field(ge=1)
     height: int = Field(ge=1)
     drought_threshold: float = Field(ge=0, le=1)
@@ -133,3 +146,150 @@ class PersistedInferenceRun(BaseModel):
     mask_url: str
     preview_url: str
     overlay_url: str
+
+
+class MonitoringLocationCreate(BaseModel):
+    """A named geographic point monitored over time."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200, description="Human-readable monitoring label")
+    latitude: float = Field(ge=-90, le=90, description="WGS84 latitude")
+    longitude: float = Field(ge=-180, le=180, description="WGS84 longitude")
+    region: str | None = Field(default=None, max_length=200, description="Optional Kazakhstan province or region")
+
+
+class MonitoringLocationPatch(BaseModel):
+    """Fields that may be changed without recreating a monitoring location."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    region: str | None = Field(default=None, max_length=200)
+    active: bool | None = None
+
+
+class MonitoringLocation(BaseModel):
+    id: str
+    name: str
+    latitude: float
+    longitude: float
+    region: str | None = None
+    created_at: str
+    active: bool
+
+
+class MonitoringAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    year: int = Field(default=2024, ge=2017, le=2100)
+    month: int | None = Field(default=None, ge=1, le=12, description="Observation month; defaults to January when omitted")
+    observation_date: date | None = Field(default=None, description="Optional exact observation date")
+    enrich: bool = Field(default=False, description="Attempt supported environmental enrichment providers")
+    metadata: dict[str, str] | None = None
+
+
+class BackfillRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_date: date
+    end_date: date
+    enrich: bool = False
+    force: bool = Field(default=False, description="Reserved for explicit replacement behavior; currently duplicates are skipped")
+
+
+class PersistedObservation(BaseModel):
+    id: str
+    location_id: str
+    observed_at: date
+    inference_run_id: str
+    year: int
+    month: int
+    drought_fraction: float = Field(ge=0, le=1)
+    drought_pixel_count: int = Field(ge=0)
+    total_pixel_count: int = Field(ge=1)
+    ndvi: float | None = Field(default=None, ge=-1, le=1)
+    ndmi: float | None = Field(default=None, ge=-1, le=1)
+    precipitation_mm: float | None = Field(default=None, ge=0, le=1000)
+    precipitation_anomaly: float | None = Field(default=None, ge=-10, le=10)
+    temperature_c: float | None = Field(default=None, ge=-60, le=70)
+    temperature_anomaly: float | None = Field(default=None, ge=-30, le=30)
+    soil_moisture: float | None = Field(default=None, ge=0, le=1)
+    soil_moisture_anomaly: float | None = Field(default=None, ge=-10, le=10)
+    vegetation_stress: float | None = Field(default=None, ge=0, le=1)
+    rainfall_stress: float | None = Field(default=None, ge=0, le=1)
+    soil_moisture_stress: float | None = Field(default=None, ge=0, le=1)
+    heat_stress: float | None = Field(default=None, ge=0, le=1)
+    segmentation_stress: float = Field(ge=0, le=1)
+    risk_score: float = Field(ge=0, le=1)
+    risk_level: MonitoringRiskLevel
+    trend: Trend
+    explanation: str
+    data_quality: Literal["complete", "partial", "segmentation_only"]
+    data_source: str
+    metadata: dict[str, str] | None = None
+    created_at: str
+
+
+class MonitoringRunSummary(PersistedInferenceRun):
+    pass
+
+
+class MonitoringObservationResponse(PersistedObservation):
+    preview_url: str
+    overlay_url: str
+    inference_run: MonitoringRunSummary | None = None
+
+
+class AnalyzeResponse(BaseModel):
+    location: MonitoringLocation
+    inference_run: MonitoringRunSummary
+    observation: MonitoringObservationResponse
+    component_stress: dict[str, float | None]
+    risk_score: float
+    risk_level: MonitoringRiskLevel
+    trend: Trend
+    explanation: str
+    data_quality: Literal["complete", "partial", "segmentation_only"]
+    preview_url: str
+    overlay_url: str
+
+
+class TimelineSummary(BaseModel):
+    latest_risk_score: float | None = None
+    latest_risk_level: MonitoringRiskLevel | None = None
+    latest_drought_fraction: float | None = None
+    observation_count: int = Field(ge=0)
+    trend: Trend
+    risk_score_change: float | None = None
+    drought_fraction_change: float | None = None
+    data_quality_notes: list[str]
+
+
+class TimelineResponse(BaseModel):
+    location: MonitoringLocation
+    observations: list[MonitoringObservationResponse]
+    summary: TimelineSummary
+
+
+class LatestResponse(BaseModel):
+    location: MonitoringLocation
+    observation: MonitoringObservationResponse
+
+
+class BackfillResponse(BaseModel):
+    location_id: str
+    created: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    periods: list[str]
+
+
+class SeasonalOutlookResponse(BaseModel):
+    status: Literal["unavailable", "available"]
+    forecast_available: bool
+    message: str
+    limitations: list[str]
+    probabilities: dict[str, float] | None = None

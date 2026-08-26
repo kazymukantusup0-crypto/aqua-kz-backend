@@ -25,7 +25,13 @@ from app.services.inference_run_service import (
     list_inference_runs,
     save_inference_run,
 )
-from ml.export_gee_dataset import EarthEngineConfigurationError, fetch_patch_for_coordinates, initialize_earth_engine
+from ml.export_gee_dataset import (
+    EarthEngineConfigurationError,
+    SatelliteImageryUnavailableError,
+    fetch_patch_for_coordinates,
+    initialize_earth_engine,
+    scene_date_range,
+)
 
 router = APIRouter(prefix="/api/ml", tags=["segmentation"])
 INFERENCE_THRESHOLD = 0.5
@@ -82,13 +88,22 @@ async def infer_uploaded_tile(tile: UploadFile = File(...)) -> SegmentationInfer
 @router.post("/infer/coordinates", response_model=SegmentationInferenceResponse)
 def infer_coordinates(request: CoordinateInferenceRequest) -> SegmentationInferenceResponse:
     try:
-        patch = fetch_patch_for_coordinates(request.latitude, request.longitude, request.year)
+        patch = fetch_patch_for_coordinates(request.latitude, request.longitude, request.year, request.month)
         mask, drought_fraction = infer_patch(patch)
     except EarthEngineConfigurationError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except SegmentationModelUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    return _response_from_probability(mask, drought_fraction)
+    except SatelliteImageryUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    response = _response_from_probability(mask, drought_fraction)
+    response.requested_year = request.year
+    response.requested_month = request.month
+    response.scene_start_date, response.scene_end_date = scene_date_range(request.year, request.month)
+    response.satellite_source = "Sentinel-2 SR Harmonized + Landsat 8/9 Collection 2 Level-2"
+    return response
 
 
 def _compact_run(run: dict) -> PersistedInferenceRun:
@@ -118,12 +133,17 @@ async def infer_and_save_uploaded_tile(tile: UploadFile = File(...)) -> Persiste
 @router.post("/runs/infer/coordinates", response_model=PersistedInferenceRun)
 def infer_and_save_coordinates(request: CoordinateInferenceRequest) -> PersistedInferenceRun:
     try:
-        patch = fetch_patch_for_coordinates(request.latitude, request.longitude, request.year)
+        patch = fetch_patch_for_coordinates(request.latitude, request.longitude, request.year, request.month)
         mask, drought_fraction = infer_patch(patch)
     except EarthEngineConfigurationError as error:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
     except SegmentationModelUnavailableError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except SatelliteImageryUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
+    scene_start, scene_end = scene_date_range(request.year, request.month)
     run = save_inference_run(
         mask,
         drought_fraction,
@@ -132,6 +152,11 @@ def infer_and_save_coordinates(request: CoordinateInferenceRequest) -> Persisted
         latitude=request.latitude,
         longitude=request.longitude,
         year=request.year,
+        requested_year=request.year,
+        requested_month=request.month,
+        scene_start_date=scene_start,
+        scene_end_date=scene_end,
+        satellite_source="Sentinel-2 SR Harmonized + Landsat 8/9 Collection 2 Level-2",
     )
     return _compact_run(run)
 

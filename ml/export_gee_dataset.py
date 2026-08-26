@@ -12,6 +12,7 @@ import tempfile
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,19 @@ LANDSAT_CLEAR_PIXEL_BITS = sum(1 << bit for bit in (0, 1, 2, 3, 4, 5))
 
 class EarthEngineConfigurationError(RuntimeError):
     """Raised when Earth Engine is unavailable or has not been authenticated."""
+
+
+class SatelliteImageryUnavailableError(RuntimeError):
+    """Raised when no imagery is available for the requested location and period."""
+
+
+def scene_date_range(year: int, month: int | None = None) -> tuple[date, date]:
+    """Return the half-open calendar window used for a coordinate composite."""
+    if month is None:
+        return date(year, GEE_GROWING_SEASON_START_MONTH, 1), date(year, GEE_GROWING_SEASON_END_MONTH + 1, 1)
+    start = date(year, month, 1)
+    end = date(year + (month == 12), 1 if month == 12 else month + 1, 1)
+    return start, end
 
 
 @dataclass(frozen=True)
@@ -115,11 +129,12 @@ def mask_landsat(image):
     ).toFloat()
 
 
-def build_composite(region, year: int):
+def build_composite(region, year: int, month: int | None = None):
     """Return seven-channel growing-season composite and VCI drought label image."""
     ee = _earth_engine()
-    start = ee.Date.fromYMD(year, GEE_GROWING_SEASON_START_MONTH, 1)
-    end = ee.Date.fromYMD(year, GEE_GROWING_SEASON_END_MONTH, 31).advance(1, "day")
+    scene_start, scene_end = scene_date_range(year, month)
+    start = ee.Date.fromYMD(scene_start.year, scene_start.month, scene_start.day)
+    end = ee.Date.fromYMD(scene_end.year, scene_end.month, scene_end.day)
     sentinel = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
         .filterBounds(region)
@@ -134,6 +149,11 @@ def build_composite(region, year: int):
         .map(mask_landsat)
     )
     observations = sentinel.merge(landsat).select(list(PATCH_CHANNELS))
+    if observations.size().getInfo() == 0:
+        period = f"{year:04d}-{month:02d}" if month is not None else f"{year:04d}"
+        raise SatelliteImageryUnavailableError(
+            f"No usable satellite imagery found for {period} at the requested location after cloud filtering."
+        )
     composite = observations.median().select(list(PATCH_CHANNELS))
     ndvi_min = observations.select("NDVI").min()
     ndvi_max = observations.select("NDVI").max()
@@ -243,13 +263,18 @@ def export_dataset(regions: list[str], year: int, max_patches: int, dataset_root
     return ExportResult(exported_patches=exported, dataset_root=dataset_root)
 
 
-def fetch_patch_for_coordinates(latitude: float, longitude: float, year: int) -> np.ndarray:
+def fetch_patch_for_coordinates(
+    latitude: float, longitude: float, year: int, month: int | None = None
+) -> np.ndarray:
     """Build and download a 256x256 seven-band patch centred on supplied coordinates."""
     initialize_earth_engine()
     ee = _earth_engine()
     point = ee.Geometry.Point([longitude, latitude])
     tile = point.buffer((PATCH_SIZE * PATCH_SCALE_METERS) / 2).bounds()
-    data_image, label_image = build_composite(tile, year)
+    data_image, label_image = build_composite(tile, year, month)
     with tempfile.TemporaryDirectory(prefix="gee_coordinate_") as temporary:
         image, _ = _download_patch(data_image, label_image, tile, Path(temporary))
+    expected_shape = (len(PATCH_CHANNELS), PATCH_SIZE, PATCH_SIZE)
+    if image.shape != expected_shape or not np.isfinite(image).all():
+        raise ValueError(f"Earth Engine returned an invalid patch; expected shape {expected_shape}.")
     return image
