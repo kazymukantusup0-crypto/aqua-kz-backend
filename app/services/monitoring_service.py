@@ -44,6 +44,10 @@ def initialize_monitoring_storage() -> None:
                 total_pixel_count INTEGER NOT NULL,
                 ndvi REAL,
                 ndmi REAL,
+                ndvi_baseline REAL,
+                ndmi_baseline REAL,
+                ndvi_anomaly REAL,
+                ndmi_anomaly REAL,
                 precipitation_mm REAL,
                 precipitation_anomaly REAL,
                 temperature_c REAL,
@@ -67,6 +71,10 @@ def initialize_monitoring_storage() -> None:
             )
             """
         )
+        existing_columns = {row[1] for row in connection.execute("PRAGMA table_info(monitoring_observations)")}
+        for column in ("ndvi_baseline", "ndmi_baseline", "ndvi_anomaly", "ndmi_anomaly"):
+            if column not in existing_columns:
+                connection.execute(f"ALTER TABLE monitoring_observations ADD COLUMN {column} REAL")
 
 
 def _row(row: Any) -> dict[str, Any] | None:

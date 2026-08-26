@@ -212,7 +212,9 @@ def _download_patch(data_image, label_image, geometry, temp_dir: Path) -> tuple[
     _download_geotiff(stacked_image, patch_path, geometry)
     patch = _read_raster(patch_path, len(PATCH_CHANNELS) + 1, Resampling.bilinear)
     image = patch[: len(PATCH_CHANNELS)].astype(np.float32)
-    label = patch[len(PATCH_CHANNELS)].astype(np.uint8)
+    # Masked/no-data label pixels are not drought observations; make that policy
+    # explicit before the integer cast to preserve the existing (label > 0) mask.
+    label = np.nan_to_num(patch[len(PATCH_CHANNELS)], nan=0.0).astype(np.uint8)
     return np.nan_to_num(image, nan=0.0), (label > 0).astype(np.uint8)
 
 

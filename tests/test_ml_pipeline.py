@@ -1,4 +1,5 @@
 from io import BytesIO
+import warnings
 
 import numpy as np
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from app.config import PATCH_SIZE
 from app.main import app
 from app.services.segmentation_service import SegmentationModelUnavailableError
 from ml.dataset import NpyDroughtPatchDataset, normalize_patch
+from ml.export_gee_dataset import _download_patch
 
 
 def test_normalize_patch_has_seven_channels_and_safe_range() -> None:
@@ -46,3 +48,24 @@ def test_uploaded_tile_returns_clear_model_not_ready_response(monkeypatch) -> No
     )
     assert response.status_code == 409
     assert "Segmentation model is unavailable" in response.json()["detail"]
+
+
+def test_download_patch_maps_nan_labels_to_non_drought_without_warning(monkeypatch, tmp_path) -> None:
+    class FakeImage:
+        def toFloat(self):
+            return self
+
+        def addBands(self, _label):
+            return self
+
+    patch = np.zeros((8, 2, 2), dtype=np.float32)
+    patch[6] = np.nan
+    patch[7] = np.array([[0.0, 1.0], [2.0, np.nan]])
+    monkeypatch.setattr("ml.export_gee_dataset._download_geotiff", lambda *_args: None)
+    monkeypatch.setattr("ml.export_gee_dataset._read_raster", lambda *_args: patch)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("error", RuntimeWarning)
+        image, label = _download_patch(FakeImage(), FakeImage(), FakeImage(), tmp_path)
+    assert not caught
+    assert image.shape == (7, 2, 2)
+    assert label.tolist() == [[0, 1], [1, 0]]

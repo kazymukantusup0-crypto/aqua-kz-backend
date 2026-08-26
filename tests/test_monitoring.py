@@ -8,6 +8,7 @@ from app.main import app
 from app.services import inference_run_service, monitoring_service
 from app.services.drought_risk_service import assess_drought_risk
 from app.services.nasa_power_service import MonthlyWeather
+from app.services.vegetation_service import VegetationIndicators
 
 
 def configure_storage(monkeypatch, tmp_path) -> None:
@@ -144,6 +145,55 @@ def test_analyze_enrichment_failure_falls_back_to_segmentation_only(monkeypatch,
     )
     assert response.status_code == 200
     assert response.json()["data_quality"] == "segmentation_only"
+
+
+def test_analyze_satellite_enrichment_failure_preserves_weather(monkeypatch, tmp_path) -> None:
+    configure_storage(monkeypatch, tmp_path)
+    mock_inference(monkeypatch)
+    monkeypatch.setattr(
+        routes_monitoring,
+        "fetch_monthly_weather",
+        lambda *_args: MonthlyWeather(32.0, 24.5, 47.0, 22.4, -32 / 47, 2.1, 32 / 47, 0.35),
+    )
+    monkeypatch.setattr(
+        routes_monitoring,
+        "enrich_patch",
+        lambda *_args: (_ for _ in ()).throw(routes_monitoring.VegetationEnrichmentError()),
+    )
+    client = TestClient(app)
+    location_id = create_location(client)["id"]
+    response = client.post(
+        f"/api/monitoring/locations/{location_id}/analyze",
+        json={"year": 2024, "month": 5, "enrich": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["data_quality"] == "partial"
+    assert response.json()["observation"]["vegetation_stress"] is None
+
+
+def test_analyze_satellite_enrichment_populates_indices_and_stress(monkeypatch, tmp_path) -> None:
+    configure_storage(monkeypatch, tmp_path)
+    mock_inference(monkeypatch)
+    monkeypatch.setattr(
+        routes_monitoring,
+        "enrich_patch",
+        lambda *_args: VegetationIndicators(
+            0.30, 0.20, 0.38, 0.25, -0.08, -0.05, 0.4
+        ),
+    )
+    client = TestClient(app)
+    location_id = create_location(client)["id"]
+    response = client.post(
+        f"/api/monitoring/locations/{location_id}/analyze",
+        json={"year": 2024, "month": 5, "enrich": True},
+    )
+    assert response.status_code == 200
+    observation = response.json()["observation"]
+    assert observation["ndvi"] == 0.3
+    assert observation["ndmi"] == 0.2
+    assert observation["ndvi_anomaly"] == -0.08
+    assert observation["vegetation_stress"] == 0.4
+    assert observation["data_quality"] == "partial"
 
 
 def test_analyze_without_enrichment_does_not_call_nasa_power(monkeypatch, tmp_path) -> None:

@@ -55,6 +55,8 @@ def assess_drought_risk(
     heat_stress: float | None = None,
     precipitation_mm: float | None = None,
     temperature_c: float | None = None,
+    ndvi_anomaly: float | None = None,
+    ndvi_baseline: float | None = None,
 ) -> RiskResult:
     """Calculate a weighted score using only measured/derived indicators."""
     if vegetation_stress is None:
@@ -116,6 +118,9 @@ def assess_drought_risk(
             f"{'below' if precipitation_anomaly < 0 else 'above'} the historical baseline."
     if temperature_anomaly is not None:
         enrichment_text += f" Temperature was about {temperature_anomaly:+.1f} C relative to the historical baseline."
+    if ndvi_anomaly is not None:
+        baseline_text = f" (local empirical baseline {ndvi_baseline:.2f})" if ndvi_baseline is not None else ""
+        enrichment_text += f" NDVI was {abs(ndvi_anomaly):.2f} {'below' if ndvi_anomaly < 0 else 'above'} the local historical baseline{baseline_text}."
     enrichment_suffix = f"{enrichment_text} " if enrichment_text else ""
     explanation = (
         f"{level.capitalize()} drought risk ({score:.2f}): segmentation detected "

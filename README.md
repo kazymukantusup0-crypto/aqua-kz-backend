@@ -122,6 +122,29 @@ not request or interpret this as sub-grid precision. Avoid excessive synchronous
 request volume, and allow for the roughly 2-3 month lag before near-real-time data
 is replaced by higher-quality reprocessed data.
 
+Coordinate analysis with `enrich: true` also derives NDVI and NDMI from the exact
+downloaded analysis patch used by segmentation. Sentinel-2 B4/B8/B11 and Landsat
+SR_B4/SR_B5/SR_B6 are first mapped to the shared Red/NIR/SWIR1 bands; Sentinel
+reflectance uses `0.0001`, while Landsat Collection 2 Level-2 uses `0.0000275`
+plus `-0.2`, before the normalized-difference calculations. Satellite vegetation
+baselines use the same calendar month over the previous ten years, are cached in
+SQLite for 30 days, and are an approximate empirical local baseline rather than an
+official climate normal. NDVI anomaly is mapped to vegetation stress from 0 at
+non-negative anomaly to 1 at `-0.20`, with linear interpolation and clamping.
+
+To manually verify one enriched observation, open `/docs`, choose the Karaganda
+demo location (`49.8, 73.1`), and call
+`POST /api/monitoring/locations/{location_id}/analyze` with:
+
+```json
+{"year": 2024, "month": 9, "enrich": true}
+```
+
+The response should include nullable `ndvi`, `ndmi`, `ndvi_baseline`,
+`ndmi_baseline`, `ndvi_anomaly`, `ndmi_anomaly`, and `vegetation_stress` fields.
+This request is not automatically re-run for existing months; the controlled
+`scripts/resync_karaganda_demo.py` tool is the explicit overwrite path.
+
 Risk is an early-warning support score, not a guaranteed forecast or causal
 agricultural diagnosis. The seasonal `/outlook` endpoint currently returns
 `forecast_available: false` because no authenticated probabilistic forecast

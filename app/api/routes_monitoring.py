@@ -23,6 +23,7 @@ from app.schemas import (
 from app.services.drought_risk_service import assess_drought_risk
 from app.services import inference_run_service, monitoring_service
 from app.services.nasa_power_service import fetch_monthly_weather
+from app.services.vegetation_service import VegetationEnrichmentError, enrich_patch
 from app.services.segmentation_service import SegmentationModelUnavailableError, infer_patch
 from ml.export_gee_dataset import (
     EarthEngineConfigurationError,
@@ -108,8 +109,21 @@ def _perform_analysis(
             weather = fetch_monthly_weather(location["latitude"], location["longitude"], observed_at.year, observed_at.month)
         except Exception:
             weather = None
+    vegetation = None
+    if enrich:
+        try:
+            vegetation = enrich_patch(
+                patch, location["latitude"], location["longitude"], observed_at.year, observed_at.month
+            )
+        except VegetationEnrichmentError:
+            vegetation = None
     assessment = assess_drought_risk(
         drought_fraction=drought_fraction,
+        ndvi=vegetation.ndvi if vegetation else None,
+        ndmi=vegetation.ndmi if vegetation else None,
+        ndvi_anomaly=vegetation.ndvi_anomaly if vegetation else None,
+        ndvi_baseline=vegetation.ndvi_baseline if vegetation else None,
+        vegetation_stress=vegetation.vegetation_stress if vegetation else None,
         precipitation_anomaly=weather.precipitation_anomaly if weather else None,
         temperature_anomaly=weather.temperature_anomaly if weather else None,
         rainfall_stress=weather.rainfall_stress if weather else None,
@@ -125,6 +139,12 @@ def _perform_analysis(
         "inference_run_id": run["id"], "year": observed_at.year, "month": observed_at.month,
         "drought_fraction": drought_fraction, "drought_pixel_count": run["drought_pixel_count"],
         "total_pixel_count": run["total_pixel_count"], "vegetation_stress": assessment.component_stress["vegetation_stress"],
+        "ndvi": vegetation.ndvi if vegetation else None,
+        "ndmi": vegetation.ndmi if vegetation else None,
+        "ndvi_baseline": vegetation.ndvi_baseline if vegetation else None,
+        "ndmi_baseline": vegetation.ndmi_baseline if vegetation else None,
+        "ndvi_anomaly": vegetation.ndvi_anomaly if vegetation else None,
+        "ndmi_anomaly": vegetation.ndmi_anomaly if vegetation else None,
         "precipitation_mm": weather.precipitation_mm if weather else None,
         "precipitation_anomaly": weather.precipitation_anomaly if weather else None,
         "temperature_c": weather.temperature_c if weather else None,
@@ -138,7 +158,11 @@ def _perform_analysis(
             {"risk_score": assessment.risk_score, "drought_fraction": drought_fraction}, previous_observation
         ),
         "explanation": assessment.explanation, "data_quality": assessment.data_quality,
-        "data_source": "Earth Engine segmentation; NASA POWER daily weather" if weather else "Earth Engine segmentation; environmental enrichment unavailable",
+        "data_source": "; ".join(source for source in (
+            "Earth Engine segmentation",
+            "satellite NDVI/NDMI" if vegetation else None,
+            "NASA POWER daily weather" if weather else None,
+        ) if source) or "Earth Engine segmentation",
         "metadata": metadata,
     }
     try:
