@@ -9,6 +9,7 @@ from app.services import inference_run_service, monitoring_service
 from app.services.drought_risk_service import assess_drought_risk
 from app.services.nasa_power_service import MonthlyWeather
 from app.services.vegetation_service import VegetationIndicators
+from app.services.recommendation_service import generate_recommendations
 
 
 def configure_storage(monkeypatch, tmp_path) -> None:
@@ -194,6 +195,24 @@ def test_analyze_satellite_enrichment_populates_indices_and_stress(monkeypatch, 
     assert observation["ndvi_anomaly"] == -0.08
     assert observation["vegetation_stress"] == 0.4
     assert observation["data_quality"] == "partial"
+
+
+def test_monitoring_responses_include_dynamic_recommendations_without_changing_score(monkeypatch, tmp_path) -> None:
+    configure_storage(monkeypatch, tmp_path)
+    mock_inference(monkeypatch)
+    client = TestClient(app)
+    location_id = create_location(client)["id"]
+    response = client.post(
+        f"/api/monitoring/locations/{location_id}/analyze",
+        json={"year": 2024, "month": 5},
+    )
+    assert response.status_code == 200
+    observation = response.json()["observation"]
+    assert observation["risk_score"] == 0.5
+    assert observation["risk_level"] == "medium"
+    assert observation["recommendations"]["disclaimer"]
+    assert response.json()["recommendations"] == observation["recommendations"]
+    assert client.get(f"/api/monitoring/locations/{location_id}/latest").json()["observation"]["recommendations"]
 
 
 def test_analyze_without_enrichment_does_not_call_nasa_power(monkeypatch, tmp_path) -> None:

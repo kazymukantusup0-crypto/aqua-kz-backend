@@ -23,6 +23,7 @@ from app.schemas import (
 from app.services.drought_risk_service import assess_drought_risk
 from app.services import inference_run_service, monitoring_service
 from app.services.nasa_power_service import fetch_monthly_weather
+from app.services.recommendation_service import generate_recommendations
 from app.services.vegetation_service import VegetationEnrichmentError, enrich_patch
 from app.services.segmentation_service import SegmentationModelUnavailableError, infer_patch
 from ml.export_gee_dataset import (
@@ -60,6 +61,7 @@ def _run_summary(run: dict) -> MonitoringRunSummary:
 
 def _observation_response(observation: dict, run: dict | None = None) -> MonitoringObservationResponse:
     response = dict(observation)
+    response["recommendations"] = generate_recommendations(response)
     response["preview_url"] = f"/api/ml/runs/{observation['inference_run_id']}/preview"
     response["overlay_url"] = f"/api/ml/runs/{observation['inference_run_id']}/overlay"
     response["inference_run"] = _run_summary(run) if run is not None else None
@@ -226,6 +228,7 @@ def analyze_location(location_id: str, request: MonitoringAnalyzeRequest) -> Ana
         trend=compact_observation.trend, explanation=compact_observation.explanation,
         data_quality=compact_observation.data_quality, preview_url=compact_observation.preview_url,
         overlay_url=compact_observation.overlay_url,
+        recommendations=compact_observation.recommendations,
     )
 
 

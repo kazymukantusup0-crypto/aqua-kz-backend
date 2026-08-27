@@ -200,6 +200,26 @@ class BackfillRequest(BaseModel):
     force: bool = Field(default=False, description="Reserved for explicit replacement behavior; currently duplicates are skipped")
 
 
+class RecommendationDriver(BaseModel):
+    key: str
+    severity: Literal["info", "warning", "danger"]
+    title: str
+    detail: str
+
+
+class RecommendationItem(BaseModel):
+    key: str
+    priority: Literal["low", "medium", "high"]
+    title: str
+    detail: str
+
+
+class RecommendationSet(BaseModel):
+    drivers: list[RecommendationDriver]
+    recommendations: list[RecommendationItem]
+    disclaimer: str
+
+
 class PersistedObservation(BaseModel):
     id: str
     location_id: str
@@ -235,6 +255,7 @@ class PersistedObservation(BaseModel):
     data_source: str
     metadata: dict[str, str] | None = None
     created_at: str
+    recommendations: RecommendationSet | None = None
 
 
 class MonitoringRunSummary(PersistedInferenceRun):
@@ -259,6 +280,7 @@ class AnalyzeResponse(BaseModel):
     data_quality: Literal["complete", "partial", "segmentation_only"]
     preview_url: str
     overlay_url: str
+    recommendations: RecommendationSet | None = None
 
 
 class TimelineSummary(BaseModel):
