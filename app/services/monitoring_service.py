@@ -22,13 +22,20 @@ def initialize_monitoring_storage() -> None:
                 longitude REAL NOT NULL,
                 region TEXT,
                 created_at TEXT NOT NULL,
-                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                location_type TEXT NOT NULL DEFAULT 'user_point' CHECK (location_type IN ('user_point', 'national_grid'))
             )
             """
         )
+        location_columns = {row[1] for row in connection.execute("PRAGMA table_info(monitoring_locations)")}
+        if "location_type" not in location_columns:
+            connection.execute("ALTER TABLE monitoring_locations ADD COLUMN location_type TEXT NOT NULL DEFAULT 'user_point'")
+        # Earlier versions indexed every active location. Grid support must allow a
+        # user to explicitly create a detailed point at a screening-cell centre.
+        connection.execute("DROP INDEX IF EXISTS active_location_coordinates")
         connection.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS active_location_coordinates "
-            "ON monitoring_locations(latitude, longitude) WHERE active = 1"
+            "CREATE UNIQUE INDEX IF NOT EXISTS active_user_point_coordinates "
+            "ON monitoring_locations(latitude, longitude) WHERE active = 1 AND location_type = 'user_point'"
         )
         connection.execute(
             """
@@ -75,6 +82,39 @@ def initialize_monitoring_storage() -> None:
         for column in ("ndvi_baseline", "ndmi_baseline", "ndvi_anomaly", "ndmi_anomaly"):
             if column not in existing_columns:
                 connection.execute(f"ALTER TABLE monitoring_observations ADD COLUMN {column} REAL")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS national_grid_cells (
+                grid_version TEXT NOT NULL,
+                cell_id TEXT NOT NULL,
+                location_id TEXT NOT NULL UNIQUE REFERENCES monitoring_locations(id),
+                center_latitude REAL NOT NULL,
+                center_longitude REAL NOT NULL,
+                cell_size_degrees REAL NOT NULL,
+                bounds_json TEXT NOT NULL,
+                geometry_json TEXT,
+                active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (grid_version, cell_id)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS national_grid_status (
+                grid_version TEXT NOT NULL,
+                cell_id TEXT NOT NULL,
+                year INTEGER NOT NULL,
+                month INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK (status IN ('ready', 'missing', 'failed', 'stale')),
+                failure_reason TEXT,
+                provenance TEXT,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (grid_version, cell_id, year, month),
+                FOREIGN KEY (grid_version, cell_id) REFERENCES national_grid_cells(grid_version, cell_id)
+            )
+            """
+        )
 
 
 def _row(row: Any) -> dict[str, Any] | None:
@@ -87,7 +127,7 @@ def _row(row: Any) -> dict[str, Any] | None:
     return result
 
 
-def create_location(name: str, latitude: float, longitude: float, region: str | None) -> dict[str, Any]:
+def create_location(name: str, latitude: float, longitude: float, region: str | None, location_type: str = "user_point") -> dict[str, Any]:
     initialize_monitoring_storage()
     location = {
         "id": str(uuid4()),
@@ -97,18 +137,19 @@ def create_location(name: str, latitude: float, longitude: float, region: str | 
         "region": region,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "active": 1,
+        "location_type": location_type,
     }
     try:
         with inference_run_service._connect() as connection:
             connection.execute(
                 "INSERT INTO monitoring_locations "
-                "(id, name, latitude, longitude, region, created_at, active) "
-                "VALUES (:id, :name, :latitude, :longitude, :region, :created_at, :active)",
+                "(id, name, latitude, longitude, region, created_at, active, location_type) "
+                "VALUES (:id, :name, :latitude, :longitude, :region, :created_at, :active, :location_type)",
                 location,
             )
     except Exception as error:
         if "UNIQUE constraint failed" in str(error):
-            raise ValueError("An active monitoring location already exists at these coordinates.") from error
+            raise ValueError("An active detailed monitoring location already exists at these coordinates.") from error
         raise
     location["active"] = True
     return location
@@ -124,7 +165,7 @@ def get_location(location_id: str) -> dict[str, Any] | None:
 def list_locations() -> list[dict[str, Any]]:
     initialize_monitoring_storage()
     with inference_run_service._connect() as connection:
-        rows = connection.execute("SELECT * FROM monitoring_locations ORDER BY active DESC, created_at DESC").fetchall()
+        rows = connection.execute("SELECT * FROM monitoring_locations WHERE location_type = 'user_point' ORDER BY active DESC, created_at DESC").fetchall()
     return [_row(row) for row in rows]
 
 

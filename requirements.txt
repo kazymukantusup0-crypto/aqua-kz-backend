@@ -19,3 +19,4 @@ albumentations>=1.4,<3.0
 segmentation-models-pytorch>=0.4,<1.0
 python-multipart>=0.0.20,<1.0
 requests>=2.31,<3.0
+matplotlib>=3.8,<4.0

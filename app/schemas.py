@@ -319,3 +319,54 @@ class SeasonalOutlookResponse(BaseModel):
     message: str
     limitations: list[str]
     probabilities: dict[str, float] | None = None
+
+
+NationalGridStatus = Literal["ready", "missing", "failed", "stale"]
+NationalGridAssessmentMode = Literal["preliminary_segmentation_signal", "multi_signal_risk", "no_data"]
+
+
+class NationalGridCellResponse(BaseModel):
+    cell_id: str
+    grid_version: str
+    latitude: float
+    longitude: float
+    cell_size_degrees: float
+    bounds: dict[str, float]
+    geometry: dict | None = None
+    status: NationalGridStatus
+    failure_reason: str | None = None
+    provenance: dict[str, str] | None = None
+    updated_at: str | None = None
+    is_screening_cell: Literal[True] = True
+    disclaimer_key: str
+    disclaimer: str
+    assessment_mode: NationalGridAssessmentMode
+    confidence_label: str
+    risk_score: float | None = Field(default=None, ge=0, le=1)
+    risk_level: MonitoringRiskLevel | None = None
+    trend: Trend | None = None
+    data_quality: Literal["complete", "partial", "segmentation_only"] | None = None
+    drought_fraction: float | None = Field(default=None, ge=0, le=1)
+    ndvi: float | None = Field(default=None, ge=-1, le=1)
+    ndmi: float | None = Field(default=None, ge=-1, le=1)
+    ndvi_anomaly: float | None = Field(default=None, ge=-2, le=2)
+    ndmi_anomaly: float | None = Field(default=None, ge=-2, le=2)
+    precipitation_anomaly: float | None = Field(default=None, ge=-10, le=10)
+    temperature_anomaly: float | None = Field(default=None, ge=-30, le=30)
+    explanation: str | None = None
+    drivers: list[RecommendationDriver] = Field(default_factory=list)
+    observed_at: date | None = None
+    analysis_metadata: dict[str, str] | None = None
+
+
+class NationalGridSummaryResponse(BaseModel):
+    grid_version: str
+    year: int
+    month: int
+    total_configured_cells: int = Field(ge=0)
+    ready: int = Field(ge=0)
+    missing: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    stale: int = Field(ge=0)
+    risk_counts: dict[str, int]
+    most_recent_update: str | None = None

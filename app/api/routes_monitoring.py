@@ -16,12 +16,15 @@ from app.schemas import (
     MonitoringLocationPatch,
     MonitoringObservationResponse,
     MonitoringRunSummary,
+    NationalGridCellResponse,
+    NationalGridSummaryResponse,
     SeasonalOutlookResponse,
     TimelineResponse,
     TimelineSummary,
 )
 from app.services.drought_risk_service import assess_drought_risk
 from app.services import inference_run_service, monitoring_service
+from app.services import national_grid_service
 from app.services.nasa_power_service import fetch_monthly_weather
 from app.services.recommendation_service import generate_recommendations
 from app.services.vegetation_service import VegetationEnrichmentError, enrich_patch
@@ -176,6 +179,30 @@ def _perform_analysis(
             raise HTTPException(status_code=409, detail="An observation already exists for this location and month.") from error
         raise
     return saved_observation, run
+
+
+@router.get("/national-grid", response_model=list[NationalGridCellResponse])
+def get_national_grid(
+    year: int = Query(default=2024, ge=2017, le=2100),
+    month: int = Query(default=9, ge=1, le=12),
+    grid_version: str | None = None,
+    risk_level: str | None = Query(default=None, pattern="^(low|medium|high|critical)$"),
+    data_quality: str | None = Query(default=None, pattern="^(complete|partial|segmentation_only)$"),
+    has_observation: bool | None = None,
+) -> list[NationalGridCellResponse]:
+    """Read persisted screening observations; unprocessed cells are explicitly missing."""
+    return national_grid_service.grid_results(
+        year, month, grid_version or "kz-grid-v1", risk_level, data_quality, has_observation
+    )
+
+
+@router.get("/national-grid/summary", response_model=NationalGridSummaryResponse)
+def get_national_grid_summary(
+    year: int = Query(default=2024, ge=2017, le=2100),
+    month: int = Query(default=9, ge=1, le=12),
+    grid_version: str | None = None,
+) -> NationalGridSummaryResponse:
+    return national_grid_service.grid_summary(year, month, grid_version or "kz-grid-v1")
 
 
 @router.post("/locations", response_model=MonitoringLocation, status_code=status.HTTP_201_CREATED)

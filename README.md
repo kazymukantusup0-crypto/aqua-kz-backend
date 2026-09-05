@@ -150,3 +150,67 @@ agricultural diagnosis. The seasonal `/outlook` endpoint currently returns
 `forecast_available: false` because no authenticated probabilistic forecast
 provider is configured. It explains that monitoring and trend analysis are
 available while seasonal outlook requires real probabilistic forecast data.
+
+## National Kazakhstan screening grid
+
+`GET /api/monitoring/national-grid` and `/api/monitoring/national-grid/summary`
+serve a separate national screening layer. It is not the detailed monitoring
+workflow: a screening cell is a coarse indicator for prioritising inspection,
+not a cadastral field boundary, field diagnosis, or agricultural prescription.
+Every cell popup and API response carries this limitation. NASA POWER and other
+coarse products must not be interpreted at field-scale precision.
+
+The default `kz-grid-v1` grid uses 1.0° × 1.0° cells over edge bounds
+40.0–56.0°N and 46.0–88.0°E. Centres are filtered through the bundled
+`app/assets/kazakhstan_boundary.geojson`: the Kazakhstan feature from Natural
+Earth **1:110m Admin 0 Countries**, which is public domain. The resulting
+configuration has 329 centres inside Kazakhstan from 672 bounding-box
+candidates. This is deliberately a coarse, configurable screening resolution.
+
+The map returns every configured cell for a period. Only an actual persisted
+observation is `ready` and has a risk score. `missing`, `failed`, and `stale`
+are data states, never low-risk estimates. For screening cells, the display
+logic intentionally distinguishes between a confirmed multi-signal risk and a
+preliminary segmentation signal:
+
+- `data_quality == "segmentation_only"` keeps the underlying machine-readable
+  `risk_score`, `risk_level`, and `drought_fraction` unchanged, but the UI
+  presents it as a preliminary segmentation signal with limited confidence.
+- `risk_score`/`risk_level` remain the real persisted values for downstream
+  analysis and API consumers; the `assessment_mode` and `confidence_label` fields
+  are display-only helper labels and never replace the underlying data.
+- `missing` cells stay neutral gray and are never shown as low-risk or ready.
+
+For example:
+
+```text
+GET /api/monitoring/national-grid?year=2024&month=9&has_observation=true
+GET /api/monitoring/national-grid/summary?year=2024&month=9
+```
+
+There is intentionally no public endpoint that starts a country-wide Earth
+Engine batch. An operator must use the controlled, sequential CLI instead:
+
+```powershell
+# Inspect the full plan: no database writes and no external provider calls.
+.\.venv\Scripts\python.exe scripts\prepare_national_grid.py --year 2024 --month 9 --dry-run
+
+# Explicit initial pilot of three cells (only after reviewing the dry run).
+.\.venv\Scripts\python.exe scripts\prepare_national_grid.py --year 2024 --month 9 --limit 3 --resume --enrich false
+
+# Resume a selected pilot or interrupted run; ready cells are skipped.
+.\.venv\Scripts\python.exe scripts\prepare_national_grid.py --year 2024 --month 9 --resume --cell-id kz-grid-v1-9-23
+
+# Controlled full sequential run, only after an operator has reviewed costs and credentials.
+.\.venv\Scripts\python.exe scripts\prepare_national_grid.py --year 2024 --month 9 --resume --enrich false
+```
+
+The CLI processes one cell at a time with a 1.5-second pause between requests,
+continues after a per-cell failure, records `missing` or `failed` instead of a
+fabricated score, and stores a configuration provenance version. `--force` is
+an explicit warning-only override for a selected re-analysis; it must not be
+used casually. A full 329-cell run has at least about 8 minutes of intentional
+rate-limit delay, plus Earth Engine download/inference and optional NASA POWER
+latency; cloud filtering, credentials, provider quotas, and unavailable imagery
+can increase runtime substantially. It never modifies the existing Karaganda
+demo point.

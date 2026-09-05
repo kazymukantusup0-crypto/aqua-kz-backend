@@ -20,6 +20,7 @@ __pycache__/
 # Trained ML weights and runtime logs
 ml/weights/*.pth
 ml/weights/*.log
+ml/weights/predictions/
 
 # Dataset files
 data/
