@@ -1,11 +1,11 @@
 # AI Drought Monitoring Platform — Backend
 
-This is the local backend for an educational drought-monitoring MVP. It uses only local, **synthetic** CSV data. Its rule-based scoring and machine-learning classifier are demonstrations, not scientifically validated drought forecasts. Do not use this project for operational agricultural, safety, financial, or drone-flight decisions.
+This is the local FastAPI backend for the AQUA KZ drought and water-deficit monitoring prototype. The monitoring workflow can use Earth Engine satellite segmentation, optional satellite vegetation enrichment, and optional NASA POWER weather enrichment. Separate risk, drone-target, and classifier endpoints use local synthetic CSV data and are demonstrations, not scientifically validated drought forecasts. Do not use this project for operational agricultural, safety, financial, or drone-flight decisions.
 
 ## Requirements
 
 - Python 3.11
-- No API keys, database, cloud account, satellite provider, or physical drone is required.
+- The synthetic demo endpoints need no external provider. Coordinate monitoring with satellite data requires Earth Engine credentials and an enabled project; optional NASA POWER enrichment needs network access but no API key.
 
 ## Local installation and run
 
@@ -28,8 +28,15 @@ Open `http://127.0.0.1:8000/docs` for interactive API documentation. The health 
 
 ```powershell
 cd backend
-pytest -q
+python -m pytest tests -q
 ```
+
+## API overview
+
+- `GET /health` reports backend availability.
+- `/api/monitoring/*` provides monitoring locations, observations, timelines, outlook status, and the national screening grid.
+- `/api/risk-*`, `/api/observations`, `/api/drone-targets`, and `/api/model-*` expose legacy local synthetic demonstration workflows.
+- `/api/ml/*` exposes segmentation dataset, inference, and artifact endpoints when the required local model and provider configuration exist.
 
 ## Model workflow
 

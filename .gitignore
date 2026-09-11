@@ -14,6 +14,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 
+# Local databases and logs
+*.db
+*.sqlite
+*.sqlite3
+*.log
+
 # Secrets
 .env
 
